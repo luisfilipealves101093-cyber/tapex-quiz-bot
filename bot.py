@@ -1,6 +1,10 @@
 import json
 import os
-from datetime import datetime, timedelta
+import csv
+import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from telegram import Update, BotCommand, BotCommandScopeChatAdministrators
 from telegram.ext import (
     ApplicationBuilder,
@@ -11,17 +15,17 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
+SHEET_URL = os.getenv("SHEET_URL")
 
 SCORES_FILE = "scores.json"
+TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
-# Armazena dados do poll ativo
-ACTIVE_POLLS = {}
 
 # ===============================
 # UTIL
 # ===============================
-def today_str():
-    return datetime.utcnow().strftime("%Y-%m-%d")
+def now_local():
+    return datetime.now(TIMEZONE)
 
 
 def load_scores():
@@ -37,126 +41,99 @@ def save_scores(data):
 
 
 # ===============================
-# CARREGAR PERGUNTAS
+# LER PLANILHA CSV
 # ===============================
-with open("questions.json", "r", encoding="utf-8") as f:
-    questions = json.load(f)
-
-
-# ===============================
-# /quiz (SÓ ADMIN)
-# ===============================
-async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_chat.id != GROUP_ID:
-        return
-
-    member = await context.bot.get_chat_member(
-        GROUP_ID, update.effective_user.id
-    )
-
-    if member.status not in ["administrator", "creator"]:
-        return
-
-    if not context.args:
-        await update.message.reply_text("Use: /quiz numero")
-        return
-
-    try:
-        numero = int(context.args[0]) - 1
-        q = questions[numero]
-    except:
-        await update.message.reply_text("Pergunta inválida.")
-        return
-
-    poll_message = await context.bot.send_poll(
-        chat_id=GROUP_ID,
-        question=q["pergunta"],
-        options=q["opcoes"],
-        type="quiz",
-        correct_option_id=q["correta"],
-        is_anonymous=False,
-        open_period=q.get("tempo"),
-    )
-
-    # Salva qual alternativa é correta e o peso
-    ACTIVE_POLLS[poll_message.poll.id] = {
-        "correta": q["correta"],
-        "peso": q.get("peso", 1)
-    }
+def load_sheet():
+    response = requests.get(SHEET_URL)
+    response.raise_for_status()
+    decoded = response.content.decode("utf-8")
+    reader = csv.DictReader(decoded.splitlines())
+    return list(reader)
 
 
 # ===============================
-# CAPTURA RESPOSTA
+# ENVIAR PERGUNTAS AUTOMÁTICAS
+# ===============================
+async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
+    rows = load_sheet()
+    current = now_local()
+
+    for row in rows:
+        if row["Enviado"]:
+            continue
+
+        if not row["Data"] or not row["Hora"]:
+            continue
+
+        data_str = row["Data"]
+        hora_str = row["Hora"]
+
+        question_datetime = datetime.strptime(
+            f"{data_str} {hora_str}", "%d/%m/%Y %H:%M"
+        ).replace(tzinfo=TIMEZONE)
+
+        if current >= question_datetime:
+            correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
+
+            poll = await context.bot.send_poll(
+                chat_id=GROUP_ID,
+                question=row["Pergunta"],
+                options=[row["A"], row["B"], row["C"], row["D"]],
+                type="quiz",
+                correct_option_id=correct_index,
+                is_anonymous=False,
+                open_period=int(row["Tempo_segundos"]),
+            )
+
+            context.bot_data[poll.poll.id] = {
+                "correta": correct_index,
+                "peso": int(row["Peso"]) if row["Peso"] else 1,
+            }
+
+            row["Enviado"] = "SIM"
+
+
+# ===============================
+# CAPTURA ACERTOS
 # ===============================
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.poll_answer
-    poll_id = answer.poll_id
 
-    if poll_id not in ACTIVE_POLLS:
+    poll_info = context.bot_data.get(answer.poll_id)
+    if not poll_info:
         return
 
-    if not answer.option_ids:
+    selected_option = answer.option_ids[0]
+    correct_option = poll_info["correta"]
+    peso = poll_info["peso"]
+
+    if selected_option != correct_option:
         return
 
-    selected = answer.option_ids[0]
-    correct = ACTIVE_POLLS[poll_id]["correta"]
-    peso = ACTIVE_POLLS[poll_id]["peso"]
-
-    if selected == correct:
-        scores = load_scores()
-        user_id = str(answer.user.id)
-
-        entry = {
-            "date": today_str(),
-            "points": peso
-        }
-
-        scores.setdefault(user_id, []).append(entry)
-        save_scores(scores)
-
-
-# ===============================
-# RANKING POR PERÍODO
-# ===============================
-def calculate_ranking(period):
     scores = load_scores()
-    ranking = {}
-    now = datetime.utcnow()
+    user_id = str(answer.user.id)
 
-    for user_id, entries in scores.items():
-        total = 0
-        for e in entries:
-            entry_date = datetime.strptime(e["date"], "%Y-%m-%d")
-
-            if period == "daily":
-                if entry_date.date() == now.date():
-                    total += e["points"]
-
-            elif period == "weekly":
-                if entry_date >= now - timedelta(days=7):
-                    total += e["points"]
-
-            elif period == "monthly":
-                if entry_date.month == now.month and entry_date.year == now.year:
-                    total += e["points"]
-
-        if total > 0:
-            ranking[user_id] = total
-
-    return dict(sorted(ranking.items(), key=lambda x: x[1], reverse=True))
+    scores[user_id] = scores.get(user_id, 0) + peso
+    save_scores(scores)
 
 
-async def send_ranking(update, context, period, title):
-    ranking = calculate_ranking(period)
+# ===============================
+# RANKING GERAL
+# ===============================
+async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    scores = load_scores()
 
-    if not ranking:
+    if not scores:
         await update.message.reply_text("Sem pontuação ainda.")
         return
 
-    text = f"🏆 {title}\n\n"
+    sorted_scores = sorted(
+        scores.items(), key=lambda x: x[1], reverse=True
+    )
 
-    for user_id, points in list(ranking.items())[:10]:
+    text = "🏆 Ranking Geral\n\n"
+
+    for user_id, points in sorted_scores[:10]:
         try:
             member = await context.bot.get_chat_member(
                 GROUP_ID, int(user_id)
@@ -170,46 +147,20 @@ async def send_ranking(update, context, period, title):
     await update.message.reply_text(text)
 
 
-async def ranking_diario(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_ranking(update, context, "daily", "Ranking Diário")
-
-
-async def ranking_semanal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_ranking(update, context, "weekly", "Ranking Semanal")
-
-
-async def ranking_mensal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_ranking(update, context, "monthly", "Ranking Mensal")
-
-
-# ===============================
-# DEFINIR COMANDOS SÓ ADMINS
-# ===============================
-async def set_commands(app):
-    await app.bot.set_my_commands(
-        [
-            BotCommand("quiz", "Enviar pergunta"),
-            BotCommand("ranking_dia", "Ranking diário"),
-            BotCommand("ranking_semana", "Ranking semanal"),
-            BotCommand("ranking_mes", "Ranking mensal"),
-        ],
-        scope=BotCommandScopeChatAdministrators(GROUP_ID),
-    )
-
-
 # ===============================
 # MAIN
 # ===============================
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("quiz", quiz))
-    app.add_handler(CommandHandler("ranking_dia", ranking_diario))
-    app.add_handler(CommandHandler("ranking_semana", ranking_semanal))
-    app.add_handler(CommandHandler("ranking_mes", ranking_mensal))
+    app.add_handler(CommandHandler("ranking", ranking))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
 
-    app.post_init = set_commands
+    app.job_queue.run_repeating(
+        check_scheduled_questions,
+        interval=60,
+        first=10,
+    )
 
     app.run_polling()
 
