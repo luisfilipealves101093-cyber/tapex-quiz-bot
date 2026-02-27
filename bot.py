@@ -3,8 +3,8 @@ import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.getenv("BOT_TOKEN")
-GROUP_ID = int(os.getenv("GROUP_ID"))
+TOKEN = os.getenv("8793938203:AAEh0RHcJ06xkFHNBEFnm29z9SdES9kY868")
+GROUP_ID = int(os.getenv("-1003848420917"))
 
 with open("questions.json", "r", encoding="utf-8") as f:
     questions = json.load(f)
