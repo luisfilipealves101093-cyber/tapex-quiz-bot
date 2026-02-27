@@ -4,21 +4,22 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
-GROUP_ID = os.getenv("GROUP_ID")
+GROUP_ID = int(os.getenv("GROUP_ID"))
 
 with open("questions.json", "r", encoding="utf-8") as f:
     questions = json.load(f)
 
-current_question = 0
-
-async def pergunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_question
-    
-    if current_question >= len(questions):
-        await context.bot.send_message(chat_id=GROUP_ID, text="Todas as perguntas já foram enviadas.")
+async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) == 0:
+        await update.message.reply_text("Use: /quiz numero_da_pergunta")
         return
 
-    q = questions[current_question]
+    try:
+        numero = int(context.args[0]) - 1
+        q = questions[numero]
+    except:
+        await update.message.reply_text("Pergunta inválida.")
+        return
 
     await context.bot.send_poll(
         chat_id=GROUP_ID,
@@ -30,9 +31,7 @@ async def pergunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_period=q.get("tempo", None)
     )
 
-    current_question += 1
-
 app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("pergunta", pergunta))
+app.add_handler(CommandHandler("quiz", quiz))
 
 app.run_polling()
