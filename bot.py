@@ -1,6 +1,6 @@
 import json
 import os
-from telegram import Update
+from telegram import Update, BotCommand, BotCommandScopeChatAdministrators
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -45,7 +45,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     member = await context.bot.get_chat_member(GROUP_ID, user_id)
 
-    # Apenas admin pode usar
+    # Apenas admin ou criador pode usar
     if member.status not in ["administrator", "creator"]:
         return
 
@@ -70,35 +70,29 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_period=q.get("tempo"),
     )
 
-    # Salva resposta correta para ranking
+    # Salva alternativa correta para ranking
     context.bot_data[poll_message.poll.id] = {
         "correta": q["correta"]
     }
 
+
 # ===============================
-# CAPTURAR RESPOSTA DA ENQUETE
+# CAPTURAR RESPOSTAS (RANKING)
 # ===============================
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.poll_answer
     user = answer.user
 
-    # Descobrir qual alternativa era correta
-    # Precisamos comparar com a pergunta ativa
-    # Como estamos enviando quiz, o Telegram já valida
-    # Então basta verificar se acertou:
     if answer.option_ids is None:
         return
 
-    # Se acertou (Telegram envia apenas alternativa escolhida)
-    # Só contabiliza se marcou alternativa correta (0-based)
     selected_option = answer.option_ids[0]
 
-    # Precisamos pegar o poll correto
-    poll = context.bot_data.get(answer.poll_id)
-    if poll is None:
+    poll_info = context.bot_data.get(answer.poll_id)
+    if not poll_info:
         return
 
-    correct_option = poll["correta"]
+    correct_option = poll_info["correta"]
 
     if selected_option == correct_option:
         ranking = load_ranking()
@@ -137,6 +131,19 @@ async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
+# DEFINIR COMANDOS SÓ PARA ADMINS
+# ===============================
+async def set_commands(app):
+    await app.bot.set_my_commands(
+        [
+            BotCommand("quiz", "Enviar pergunta"),
+            BotCommand("ranking", "Ver ranking"),
+        ],
+        scope=BotCommandScopeChatAdministrators(GROUP_ID),
+    )
+
+
+# ===============================
 # MAIN
 # ===============================
 def main():
@@ -145,6 +152,8 @@ def main():
     app.add_handler(CommandHandler("quiz", quiz))
     app.add_handler(CommandHandler("ranking", ranking))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
+
+    app.post_init = set_commands
 
     app.run_polling()
 
