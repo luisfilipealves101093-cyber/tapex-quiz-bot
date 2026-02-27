@@ -5,12 +5,15 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 with open("questions.json", "r", encoding="utf-8") as f:
     questions = json.load(f)
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Só permite comando dentro do grupo correto
+    if update.effective_chat.id != GROUP_ID:
+        return
+
     if len(context.args) == 0:
         await update.message.reply_text("Use: /quiz numero_da_pergunta")
         return
@@ -29,14 +32,13 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         type="quiz",
         correct_option_id=q["correta"],
         is_anonymous=False,
-        open_period=q.get("tempo", None)
+        open_period=q.get("tempo")
     )
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("quiz", quiz))
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("quiz", quiz))
+    app.run_polling()
 
-app.run_webhook(
-    listen="0.0.0.0",
-    port=int(os.environ.get("PORT", 10000)),
-    webhook_url=f"{RENDER_EXTERNAL_URL}/"
-)
+if __name__ == "__main__":
+    main()
