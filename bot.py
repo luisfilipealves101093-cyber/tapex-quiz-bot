@@ -13,9 +13,6 @@ GROUP_ID = int(os.getenv("GROUP_ID"))
 
 RANKING_FILE = "ranking.json"
 
-# Guarda a resposta correta da pergunta atual
-CURRENT_CORRECT = None
-
 # ===============================
 # CARREGAR PERGUNTAS
 # ===============================
@@ -42,8 +39,6 @@ def save_ranking(data):
 # COMANDO /quiz (SÓ ADMIN)
 # ===============================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global CURRENT_CORRECT
-
     if update.effective_chat.id != GROUP_ID:
         return
 
@@ -65,8 +60,6 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Pergunta inválida.")
         return
 
-    CURRENT_CORRECT = q["correta"]
-
     await context.bot.send_poll(
         chat_id=GROUP_ID,
         question=q["pergunta"],
@@ -82,20 +75,11 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # CAPTURAR RESPOSTAS (RANKING)
 # ===============================
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global CURRENT_CORRECT
-
-    if CURRENT_CORRECT is None:
-        return
-
     answer = update.poll_answer
     user = answer.user
 
-    if not answer.option_ids:
-        return
-
-    selected_option = answer.option_ids[0]
-
-    if selected_option == CURRENT_CORRECT:
+    # Telegram já informa se a resposta está correta
+    if answer.is_correct:
         ranking = load_ranking()
         ranking[str(user.id)] = ranking.get(str(user.id), 0) + 1
         save_ranking(ranking)
