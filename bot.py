@@ -13,6 +13,9 @@ GROUP_ID = int(os.getenv("GROUP_ID"))
 
 RANKING_FILE = "ranking.json"
 
+# Guarda a resposta correta da pergunta atual
+CURRENT_CORRECT = None
+
 # ===============================
 # CARREGAR PERGUNTAS
 # ===============================
@@ -39,6 +42,8 @@ def save_ranking(data):
 # COMANDO /quiz (SÓ ADMIN)
 # ===============================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global CURRENT_CORRECT
+
     if update.effective_chat.id != GROUP_ID:
         return
 
@@ -60,7 +65,9 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Pergunta inválida.")
         return
 
-    poll_message = await context.bot.send_poll(
+    CURRENT_CORRECT = q["correta"]
+
+    await context.bot.send_poll(
         chat_id=GROUP_ID,
         question=q["pergunta"],
         options=q["opcoes"],
@@ -70,31 +77,25 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_period=q.get("tempo"),
     )
 
-    # Salva alternativa correta para ranking
-    context.bot_data[poll_message.poll.id] = {
-        "correta": q["correta"]
-    }
-
 
 # ===============================
 # CAPTURAR RESPOSTAS (RANKING)
 # ===============================
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global CURRENT_CORRECT
+
+    if CURRENT_CORRECT is None:
+        return
+
     answer = update.poll_answer
     user = answer.user
 
-    if answer.option_ids is None:
+    if not answer.option_ids:
         return
 
     selected_option = answer.option_ids[0]
 
-    poll_info = context.bot_data.get(answer.poll_id)
-    if not poll_info:
-        return
-
-    correct_option = poll_info["correta"]
-
-    if selected_option == correct_option:
+    if selected_option == CURRENT_CORRECT:
         ranking = load_ranking()
         ranking[str(user.id)] = ranking.get(str(user.id), 0) + 1
         save_ranking(ranking)
