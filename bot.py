@@ -45,7 +45,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     member = await context.bot.get_chat_member(GROUP_ID, user_id)
 
-    # Permite apenas administrador ou criador
+    # Apenas admin pode usar
     if member.status not in ["administrator", "creator"]:
         return
 
@@ -60,7 +60,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Pergunta inválida.")
         return
 
-    await context.bot.send_poll(
+    poll_message = await context.bot.send_poll(
         chat_id=GROUP_ID,
         question=q["pergunta"],
         options=q["opcoes"],
@@ -70,6 +70,10 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_period=q.get("tempo"),
     )
 
+    # Salva resposta correta para ranking
+    context.bot_data[poll_message.poll.id] = {
+        "correta": q["correta"]
+    }
 
 # ===============================
 # CAPTURAR RESPOSTA DA ENQUETE
