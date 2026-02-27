@@ -13,8 +13,9 @@ TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 
 SCORES_FILE = "scores.json"
-CURRENT_WEIGHT = 1
 
+# Armazena dados do poll ativo
+ACTIVE_POLLS = {}
 
 # ===============================
 # UTIL
@@ -46,7 +47,6 @@ with open("questions.json", "r", encoding="utf-8") as f:
 # /quiz (SÓ ADMIN)
 # ===============================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global CURRENT_WEIGHT
 
     if update.effective_chat.id != GROUP_ID:
         return
@@ -69,9 +69,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Pergunta inválida.")
         return
 
-    CURRENT_WEIGHT = q.get("peso", 1)
-
-    await context.bot.send_poll(
+    poll_message = await context.bot.send_poll(
         chat_id=GROUP_ID,
         question=q["pergunta"],
         options=q["opcoes"],
@@ -81,28 +79,41 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         open_period=q.get("tempo"),
     )
 
-
-# ===============================
-# CAPTURA ACERTO
-# ===============================
-async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global CURRENT_WEIGHT
-
-    answer = update.poll_answer
-
-    if not answer.is_correct:
-        return
-
-    scores = load_scores()
-    user_id = str(answer.user.id)
-
-    entry = {
-        "date": today_str(),
-        "points": CURRENT_WEIGHT
+    # Salva qual alternativa é correta e o peso
+    ACTIVE_POLLS[poll_message.poll.id] = {
+        "correta": q["correta"],
+        "peso": q.get("peso", 1)
     }
 
-    scores.setdefault(user_id, []).append(entry)
-    save_scores(scores)
+
+# ===============================
+# CAPTURA RESPOSTA
+# ===============================
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer = update.poll_answer
+    poll_id = answer.poll_id
+
+    if poll_id not in ACTIVE_POLLS:
+        return
+
+    if not answer.option_ids:
+        return
+
+    selected = answer.option_ids[0]
+    correct = ACTIVE_POLLS[poll_id]["correta"]
+    peso = ACTIVE_POLLS[poll_id]["peso"]
+
+    if selected == correct:
+        scores = load_scores()
+        user_id = str(answer.user.id)
+
+        entry = {
+            "date": today_str(),
+            "points": peso
+        }
+
+        scores.setdefault(user_id, []).append(entry)
+        save_scores(scores)
 
 
 # ===============================
@@ -111,7 +122,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def calculate_ranking(period):
     scores = load_scores()
     ranking = {}
-
     now = datetime.utcnow()
 
     for user_id, entries in scores.items():
