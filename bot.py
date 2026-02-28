@@ -5,7 +5,7 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import Update, BotCommand, BotCommandScopeChatAdministrators
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -40,9 +40,6 @@ def save_scores(data):
         json.dump(data, f)
 
 
-# ===============================
-# LER PLANILHA CSV
-# ===============================
 def load_sheet():
     response = requests.get(SHEET_URL)
     response.raise_for_status()
@@ -51,8 +48,59 @@ def load_sheet():
     return list(reader)
 
 
+def find_question_by_id(question_id):
+    rows = load_sheet()
+    for row in rows:
+        if row["ID"].strip() == question_id.strip():
+            return row
+    return None
+
+
 # ===============================
-# ENVIAR PERGUNTAS AUTOMÁTICAS
+# ENVIAR QUIZ
+# ===============================
+async def send_quiz(row, context):
+    correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
+
+    poll = await context.bot.send_poll(
+        chat_id=GROUP_ID,
+        question=row["Pergunta"],
+        options=[row["A"], row["B"], row["C"], row["D"]],
+        type="quiz",
+        correct_option_id=correct_index,
+        is_anonymous=False,
+        open_period=int(row["Tempo_segundos"]) if row["Tempo_segundos"] else 60,
+    )
+
+    context.bot_data[poll.poll.id] = {
+        "correta": correct_index,
+        "peso": int(row["Peso"]) if row["Peso"] else 1,
+    }
+
+
+# ===============================
+# COMANDO MANUAL /quiz ID
+# ===============================
+async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("Use: /quiz ID_DA_QUESTAO")
+        return
+
+    question_id = context.args[0]
+    row = find_question_by_id(question_id)
+
+    if not row:
+        await update.message.reply_text("ID não encontrado.")
+        return
+
+    await send_quiz(row, context)
+
+
+# ===============================
+# AUTOMÁTICO POR DATA/HORA
 # ===============================
 async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     rows = load_sheet()
@@ -65,32 +113,13 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
         if not row["Data"] or not row["Hora"]:
             continue
 
-        data_str = row["Data"]
-        hora_str = row["Hora"]
-
         question_datetime = datetime.strptime(
-            f"{data_str} {hora_str}", "%d/%m/%Y %H:%M"
+            f"{row['Data']} {row['Hora']}",
+            "%d/%m/%Y %H:%M"
         ).replace(tzinfo=TIMEZONE)
 
         if current >= question_datetime:
-            correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
-
-            poll = await context.bot.send_poll(
-                chat_id=GROUP_ID,
-                question=row["Pergunta"],
-                options=[row["A"], row["B"], row["C"], row["D"]],
-                type="quiz",
-                correct_option_id=correct_index,
-                is_anonymous=False,
-                open_period=int(row["Tempo_segundos"]),
-            )
-
-            context.bot_data[poll.poll.id] = {
-                "correta": correct_index,
-                "peso": int(row["Peso"]) if row["Peso"] else 1,
-            }
-
-            row["Enviado"] = "SIM"
+            await send_quiz(row, context)
 
 
 # ===============================
@@ -103,11 +132,11 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not poll_info:
         return
 
-    selected_option = answer.option_ids[0]
-    correct_option = poll_info["correta"]
+    selected = answer.option_ids[0]
+    correct = poll_info["correta"]
     peso = poll_info["peso"]
 
-    if selected_option != correct_option:
+    if selected != correct:
         return
 
     scores = load_scores()
@@ -118,7 +147,7 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 # ===============================
-# RANKING GERAL
+# RANKING
 # ===============================
 async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scores = load_scores()
@@ -127,9 +156,7 @@ async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sem pontuação ainda.")
         return
 
-    sorted_scores = sorted(
-        scores.items(), key=lambda x: x[1], reverse=True
-    )
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
     text = "🏆 Ranking Geral\n\n"
 
@@ -153,6 +180,7 @@ async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
+    app.add_handler(CommandHandler("quiz", quiz))
     app.add_handler(CommandHandler("ranking", ranking))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
 
