@@ -111,21 +111,22 @@ async def send_quiz(row, context):
 # COMANDO MANUAL /quiz ID
 # ===============================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if update.effective_chat.id != GROUP_ID:
         return
 
     if not context.args:
-        await update.message.reply_text("Use: /quiz ID_DA_QUESTAO")
+        await update.message.reply_text("Use: /quiz ID1 ID2 ID3")
         return
 
-    question_id = context.args[0]
-    row = find_question_by_id(question_id)
+    for question_id in context.args:
+        row = find_question_by_id(question_id)
 
-    if not row:
-        await update.message.reply_text("ID não encontrado.")
-        return
+        if not row:
+            await update.message.reply_text(f"ID {question_id} não encontrado.")
+            continue
 
-    await send_quiz(row, context)
+        await send_quiz(row, context)
 
 
 # ===============================
