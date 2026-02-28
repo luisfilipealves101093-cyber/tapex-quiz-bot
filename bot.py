@@ -20,6 +20,9 @@ SHEET_URL = os.getenv("SHEET_URL")
 SCORES_FILE = "scores.json"
 TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
+# 🔒 Controle de perguntas já enviadas
+SENT_QUESTIONS = set()
+
 
 # ===============================
 # UTIL
@@ -108,7 +111,10 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
 
     for row in rows:
 
-        if row["Enviado"]:
+        question_id = row["ID"].strip()
+
+        # 🔒 Se já foi enviada, ignora
+        if question_id in SENT_QUESTIONS:
             continue
 
         if not row["Data"] or not row["Hora"]:
@@ -130,6 +136,9 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
 
         if current >= question_datetime:
             await send_quiz(row, context)
+
+            # ✅ Marca como enviada
+            SENT_QUESTIONS.add(question_id)
 
 
 # ===============================
