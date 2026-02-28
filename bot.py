@@ -113,11 +113,16 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
         if not row["Data"] or not row["Hora"]:
             continue
 
-        question_datetime = datetime.strptime(
-            f"{row['Data']} {row['Hora']}",
-            "%d/%m/%Y %H:%M"
-        ).replace(tzinfo=TIMEZONE)
+try:
+    question_datetime = datetime.strptime(
+        f"{data_str} {hora_str}", "%d/%m/%Y %H:%M:%S"
+    )
+except ValueError:
+    question_datetime = datetime.strptime(
+        f"{data_str} {hora_str}", "%d/%m/%Y %H:%M"
+    )
 
+question_datetime = question_datetime.replace(tzinfo=TIMEZONE)
         if current >= question_datetime:
             await send_quiz(row, context)
 
