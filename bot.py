@@ -63,11 +63,18 @@ def find_question_by_id(question_id):
 # ENVIAR QUIZ
 # ===============================
 async def send_quiz(row, context):
+
+    question_text = row["Pergunta"].strip()
+
+    # 🔒 Limite de 300 caracteres
+    if len(question_text) > 300:
+        question_text = question_text[:297] + "..."
+
     correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
 
     poll = await context.bot.send_poll(
         chat_id=GROUP_ID,
-        question=row["Pergunta"],
+        question=question_text,
         options=[row["A"], row["B"], row["C"], row["D"]],
         type="quiz",
         correct_option_id=correct_index,
@@ -79,7 +86,6 @@ async def send_quiz(row, context):
         "correta": correct_index,
         "peso": int(row["Peso"]) if row["Peso"] else 1,
     }
-
 
 # ===============================
 # COMANDO MANUAL /quiz ID
