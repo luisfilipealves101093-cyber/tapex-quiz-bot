@@ -18,9 +18,10 @@ GROUP_ID = int(os.getenv("GROUP_ID"))
 SHEET_URL = os.getenv("SHEET_URL")
 
 SCORES_FILE = "scores.json"
-SENT_FILE = "sent_questions.json"
-
 TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+# 🔒 Controle de perguntas já enviadas
+SENT_QUESTIONS = set()
 
 
 # ===============================
@@ -30,7 +31,6 @@ def now_local():
     return datetime.now(TIMEZONE)
 
 
-# ---------- SCORES ----------
 def load_scores():
     if not os.path.exists(SCORES_FILE):
         return {}
@@ -43,23 +43,6 @@ def save_scores(data):
         json.dump(data, f)
 
 
-# ---------- SENT QUESTIONS ----------
-def load_sent_questions():
-    if not os.path.exists(SENT_FILE):
-        return set()
-    with open(SENT_FILE, "r") as f:
-        return set(json.load(f))
-
-
-def save_sent_questions(data):
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(data), f)
-
-
-SENT_QUESTIONS = load_sent_questions()
-
-
-# ---------- SHEET ----------
 def load_sheet():
     response = requests.get(SHEET_URL)
     response.raise_for_status()
@@ -120,15 +103,17 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
-# AUTOMÁTICO POR DATA/HORA (CORRIGIDO)
+# AUTOMÁTICO POR DATA/HORA
 # ===============================
 async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     rows = load_sheet()
     current = now_local()
 
     for row in rows:
+
         question_id = row["ID"].strip()
 
+        # 🔒 Se já foi enviada, ignora
         if question_id in SENT_QUESTIONS:
             continue
 
@@ -149,14 +134,11 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
 
         question_datetime = question_datetime.replace(tzinfo=TIMEZONE)
 
-        # 🔥 NOVA LÓGICA: janela de 60 segundos
-        time_difference = (current - question_datetime).total_seconds()
-
-        if 0 <= time_difference < 60:
+        if current >= question_datetime:
             await send_quiz(row, context)
 
+            # ✅ Marca como enviada
             SENT_QUESTIONS.add(question_id)
-            save_sent_questions(SENT_QUESTIONS)
 
 
 # ===============================
