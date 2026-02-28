@@ -120,7 +120,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
-# AUTOMÁTICO POR DATA/HORA
+# AUTOMÁTICO POR DATA/HORA (CORRIGIDO)
 # ===============================
 async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     rows = load_sheet()
@@ -129,7 +129,6 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     for row in rows:
         question_id = row["ID"].strip()
 
-        # Se já enviada, ignora
         if question_id in SENT_QUESTIONS:
             continue
 
@@ -150,7 +149,10 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
 
         question_datetime = question_datetime.replace(tzinfo=TIMEZONE)
 
-        if current >= question_datetime:
+        # 🔥 NOVA LÓGICA: janela de 60 segundos
+        time_difference = (current - question_datetime).total_seconds()
+
+        if 0 <= time_difference < 60:
             await send_quiz(row, context)
 
             SENT_QUESTIONS.add(question_id)
