@@ -64,27 +64,47 @@ def find_question_by_id(question_id):
 # ===============================
 async def send_quiz(row, context):
 
-    question_text = row["Pergunta"].strip()
-
-    # 🔒 Limite de 300 caracteres
-    if len(question_text) > 300:
-        question_text = question_text[:297] + "..."
-
+    enunciado = row["Pergunta"].strip()
     correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
+    tempo = int(row["Tempo_segundos"]) if row["Tempo_segundos"] else 60
+    peso = int(row["Peso"]) if row["Peso"] else 1
 
-    poll = await context.bot.send_poll(
-        chat_id=GROUP_ID,
-        question=question_text,
-        options=[row["A"], row["B"], row["C"], row["D"]],
-        type="quiz",
-        correct_option_id=correct_index,
-        is_anonymous=False,
-        open_period=int(row["Tempo_segundos"]) if row["Tempo_segundos"] else 60,
-    )
+    # 🧠 Detecta automaticamente se é questão longa
+    if len(enunciado) > 250:
+
+        # 1️⃣ Envia enunciado completo
+        await context.bot.send_message(
+            chat_id=GROUP_ID,
+            text=f"📘 *Questão*\n\n{enunciado}",
+            parse_mode="Markdown"
+        )
+
+        # 2️⃣ Envia enquete curta
+        poll = await context.bot.send_poll(
+            chat_id=GROUP_ID,
+            question="Qual a alternativa correta?",
+            options=[row["A"], row["B"], row["C"], row["D"]],
+            type="quiz",
+            correct_option_id=correct_index,
+            is_anonymous=False,
+            open_period=tempo,
+        )
+
+    else:
+        # 🟢 Questão curta → envia normal
+        poll = await context.bot.send_poll(
+            chat_id=GROUP_ID,
+            question=enunciado,
+            options=[row["A"], row["B"], row["C"], row["D"]],
+            type="quiz",
+            correct_option_id=correct_index,
+            is_anonymous=False,
+            open_period=tempo,
+        )
 
     context.bot_data[poll.poll.id] = {
         "correta": correct_index,
-        "peso": int(row["Peso"]) if row["Peso"] else 1,
+        "peso": peso,
     }
 
 # ===============================
