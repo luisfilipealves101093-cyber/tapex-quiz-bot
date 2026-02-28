@@ -78,9 +78,21 @@ async def send_quiz(row, context):
     except:
         tempo = None
 
+    pergunta_completa = row["Pergunta"].strip()
+
+    # 🔥 ÚNICA NOVA LÓGICA
+    if len(pergunta_completa) > 300:
+        await context.bot.send_message(
+            chat_id=GROUP_ID,
+            text=pergunta_completa
+        )
+        pergunta_enquete = "Qual a alternativa correta?"
+    else:
+        pergunta_enquete = pergunta_completa
+
     poll = await context.bot.send_poll(
         chat_id=GROUP_ID,
-        question=row["Pergunta"][:300],
+        question=pergunta_enquete,
         options=[row["A"], row["B"], row["C"], row["D"]],
         type="quiz",
         correct_option_id=correct_index,
@@ -97,7 +109,7 @@ async def send_quiz(row, context):
         "chat_id": GROUP_ID
     }
 
-    # Comentário automático se tiver tempo
+    # Comentário automático continua igual
     if tempo and comentario:
         context.job_queue.run_once(
             enviar_comentario_automatico,
