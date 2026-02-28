@@ -4,6 +4,7 @@ import csv
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import re
 
 from telegram import Update
 from telegram.ext import (
@@ -13,6 +14,9 @@ from telegram.ext import (
     PollAnswerHandler,
 )
 
+# ===============================
+# CONFIG
+# ===============================
 TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 SHEET_URL = os.getenv("SHEET_URL")
@@ -20,13 +24,16 @@ SHEET_URL = os.getenv("SHEET_URL")
 SCORES_FILE = "scores.json"
 TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
-# 🔒 Controle de perguntas já enviadas
 SENT_QUESTIONS = set()
-
 
 # ===============================
 # UTIL
 # ===============================
+def escape_markdown(text):
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
+
 def now_local():
     return datetime.now(TIMEZONE)
 
@@ -64,51 +71,66 @@ def find_question_by_id(question_id):
 # ===============================
 async def send_quiz(row, context):
 
-    enunciado = row["Pergunta"].strip()
     correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
-    tempo = int(row["Tempo_segundos"]) if row["Tempo_segundos"] else 60
-    peso = int(row["Peso"]) if row["Peso"] else 1
 
-    # 🧠 Detecta automaticamente se é questão longa
-    if len(enunciado) > 250:
+    try:
+        tempo = int(row["Tempo_segundos"])
+    except:
+        tempo = None
 
-        # 1️⃣ Envia enunciado completo
-        await context.bot.send_message(
-            chat_id=GROUP_ID,
-            text=f"📘 *Questão*\n\n{enunciado}",
-            parse_mode="Markdown"
-        )
+    poll = await context.bot.send_poll(
+        chat_id=GROUP_ID,
+        question=row["Pergunta"][:300],
+        options=[row["A"], row["B"], row["C"], row["D"]],
+        type="quiz",
+        correct_option_id=correct_index,
+        is_anonymous=False,
+        open_period=tempo,
+    )
 
-        # 2️⃣ Envia enquete curta
-        poll = await context.bot.send_poll(
-            chat_id=GROUP_ID,
-            question="Qual a alternativa correta?",
-            options=[row["A"], row["B"], row["C"], row["D"]],
-            type="quiz",
-            correct_option_id=correct_index,
-            is_anonymous=False,
-            open_period=tempo,
-        )
-
-    else:
-        # 🟢 Questão curta → envia normal
-        poll = await context.bot.send_poll(
-            chat_id=GROUP_ID,
-            question=enunciado,
-            options=[row["A"], row["B"], row["C"], row["D"]],
-            type="quiz",
-            correct_option_id=correct_index,
-            is_anonymous=False,
-            open_period=tempo,
-        )
+    comentario = row.get("Comentário", "").strip()
 
     context.bot_data[poll.poll.id] = {
         "correta": correct_index,
-        "peso": peso,
+        "peso": int(row["Peso"]) if row["Peso"] else 1,
+        "comentario": comentario,
+        "chat_id": GROUP_ID
     }
 
+    # Comentário automático se tiver tempo
+    if tempo and comentario:
+        context.job_queue.run_once(
+            enviar_comentario_automatico,
+            when=tempo,
+            data={"poll_id": poll.poll.id}
+        )
+
+
+async def enviar_comentario_automatico(context: ContextTypes.DEFAULT_TYPE):
+
+    poll_id = context.job.data["poll_id"]
+    poll_info = context.bot_data.get(poll_id)
+
+    if not poll_info:
+        return
+
+    comentario = poll_info.get("comentario")
+
+    if not comentario:
+        return
+
+    comentario = escape_markdown(comentario)
+    texto = f"🧠 Comentário:\n\n||{comentario}||"
+
+    await context.bot.send_message(
+        chat_id=poll_info["chat_id"],
+        text=texto,
+        parse_mode="MarkdownV2"
+    )
+
+
 # ===============================
-# COMANDO MANUAL /quiz ID
+# COMANDO /quiz
 # ===============================
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -130,7 +152,41 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
-# AUTOMÁTICO POR DATA/HORA
+# COMANDO /comentario
+# ===============================
+async def comentario(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_chat.id != GROUP_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("Use: /comentario ID")
+        return
+
+    question_id = context.args[0]
+    row = find_question_by_id(question_id)
+
+    if not row:
+        await update.message.reply_text("ID não encontrado.")
+        return
+
+    comentario_texto = row.get("Comentário", "").strip()
+
+    if not comentario_texto:
+        await update.message.reply_text("Essa questão não possui comentário.")
+        return
+
+    comentario_texto = escape_markdown(comentario_texto)
+    texto = f"🧠 Comentário:\n\n||{comentario_texto}||"
+
+    await update.message.reply_text(
+        texto,
+        parse_mode="MarkdownV2"
+    )
+
+
+# ===============================
+# AGENDAMENTO
 # ===============================
 async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     rows = load_sheet()
@@ -140,62 +196,33 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
 
         question_id = row["ID"].strip()
 
-        # 🔒 Se já foi enviada, ignora
         if question_id in SENT_QUESTIONS:
             continue
 
         if not row["Data"] or not row["Hora"]:
             continue
 
-        data_str = row["Data"]
-        hora_str = row["Hora"]
-
         try:
             question_datetime = datetime.strptime(
-                f"{data_str} {hora_str}", "%d/%m/%Y %H:%M:%S"
+                f"{row['Data']} {row['Hora']}", "%d/%m/%Y %H:%M:%S"
             )
         except ValueError:
             question_datetime = datetime.strptime(
-                f"{data_str} {hora_str}", "%d/%m/%Y %H:%M"
+                f"{row['Data']} {row['Hora']}", "%d/%m/%Y %H:%M"
             )
 
         question_datetime = question_datetime.replace(tzinfo=TIMEZONE)
 
         if current >= question_datetime:
             await send_quiz(row, context)
-
-            # ✅ Marca como enviada
             SENT_QUESTIONS.add(question_id)
-
-
-# ===============================
-# CAPTURA ACERTOS
-# ===============================
-async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    answer = update.poll_answer
-
-    poll_info = context.bot_data.get(answer.poll_id)
-    if not poll_info:
-        return
-
-    selected = answer.option_ids[0]
-    correct = poll_info["correta"]
-    peso = poll_info["peso"]
-
-    if selected != correct:
-        return
-
-    scores = load_scores()
-    user_id = str(answer.user.id)
-
-    scores[user_id] = scores.get(user_id, 0) + peso
-    save_scores(scores)
 
 
 # ===============================
 # RANKING
 # ===============================
 async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     scores = load_scores()
 
     if not scores:
@@ -208,9 +235,7 @@ async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for user_id, points in sorted_scores[:10]:
         try:
-            member = await context.bot.get_chat_member(
-                GROUP_ID, int(user_id)
-            )
+            member = await context.bot.get_chat_member(GROUP_ID, int(user_id))
             name = member.user.first_name
         except:
             name = "Usuário"
@@ -221,6 +246,27 @@ async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
+# CAPTURA ACERTOS
+# ===============================
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    answer = update.poll_answer
+    poll_info = context.bot_data.get(answer.poll_id)
+
+    if not poll_info:
+        return
+
+    if answer.option_ids[0] != poll_info["correta"]:
+        return
+
+    scores = load_scores()
+    user_id = str(answer.user.id)
+
+    scores[user_id] = scores.get(user_id, 0) + poll_info["peso"]
+    save_scores(scores)
+
+
+# ===============================
 # MAIN
 # ===============================
 def main():
@@ -228,6 +274,7 @@ def main():
 
     app.add_handler(CommandHandler("quiz", quiz))
     app.add_handler(CommandHandler("ranking", ranking))
+    app.add_handler(CommandHandler("comentario", comentario))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
 
     app.job_queue.run_repeating(
