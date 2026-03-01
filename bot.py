@@ -5,7 +5,7 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import re
-
+import asyncio
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -193,7 +193,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "-" in arg:
             inicio, fim = arg.split("-")
 
-            prefixo = inicio[:1]  # Q
+            prefixo = inicio[:1]  # normalmente "Q"
             num_inicio = int(inicio[1:])
             num_fim = int(fim[1:])
 
@@ -203,13 +203,16 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 if row:
                     await send_quiz(row, context)
+                    await asyncio.sleep(1)  # ⏳ DELAY 1 SEGUNDO
                 else:
                     await update.message.reply_text(f"{question_id} não encontrado.")
+
         else:
             row = find_question_by_id(arg)
 
             if row:
                 await send_quiz(row, context)
+                await asyncio.sleep(1)  # ⏳ DELAY 1 SEGUNDO
             else:
                 await update.message.reply_text(f"{arg} não encontrado.")
 
