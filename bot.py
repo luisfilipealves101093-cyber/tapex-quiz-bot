@@ -69,7 +69,7 @@ def find_question_by_id(question_id):
 # ===============================
 # ENVIAR QUIZ
 # ===============================
-async def send_quiz(row, context):
+async def send_quiz(row, context, chat_id, thread_id=None):
 
     pergunta_completa = row["Pergunta"].strip()
     alternativas = [row["A"], row["B"], row["C"], row["D"]]
@@ -82,9 +82,7 @@ async def send_quiz(row, context):
     except:
         tempo = None
 
-    # ===============================
-    # 🎯 Detectar tipo automaticamente
-    # ===============================
+    # Detectar tipo automaticamente
     texto_lower = pergunta_completa.lower()
 
     palavras_incorreta = [
@@ -100,12 +98,11 @@ async def send_quiz(row, context):
     else:
         pergunta_base = "Qual a alternativa correta?"
 
-    # ===============================
-    # 📜 1️⃣ ENVIAR ENUNCIADO PRIMEIRO
-    # ===============================
+    # 1️⃣ Enunciado
     if len(pergunta_completa) > 300:
         await context.bot.send_message(
-            chat_id=GROUP_ID,
+            chat_id=chat_id,
+            message_thread_id=thread_id,
             text=pergunta_completa
         )
         await asyncio.sleep(0.4)
@@ -113,19 +110,16 @@ async def send_quiz(row, context):
     else:
         pergunta_enquete = pergunta_completa
 
-    # ===============================
-    # 🖼 2️⃣ ENVIAR IMAGEM (SE EXISTIR)
-    # ===============================
+    # 2️⃣ Imagem
     if imagem_url:
         await context.bot.send_photo(
-            chat_id=GROUP_ID,
+            chat_id=chat_id,
+            message_thread_id=thread_id,
             photo=imagem_url
         )
         await asyncio.sleep(0.4)
 
-    # ===============================
-    # 📏 3️⃣ VERIFICAR TAMANHO DAS ALTERNATIVAS
-    # ===============================
+    # 3️⃣ Alternativas longas
     alternativas_longas = any(len(alt) > 100 for alt in alternativas)
 
     if alternativas_longas:
@@ -136,7 +130,8 @@ async def send_quiz(row, context):
             texto_alternativas += f"{letras[i]}) {alt}\n\n"
 
         await context.bot.send_message(
-            chat_id=GROUP_ID,
+            chat_id=chat_id,
+            message_thread_id=thread_id,
             text=texto_alternativas
         )
         await asyncio.sleep(0.4)
@@ -145,11 +140,10 @@ async def send_quiz(row, context):
     else:
         opcoes_enquete = alternativas
 
-    # ===============================
-    # 🗳 4️⃣ ENVIAR ENQUETE POR ÚLTIMO
-    # ===============================
+    # 4️⃣ Enquete
     poll = await context.bot.send_poll(
-        chat_id=GROUP_ID,
+        chat_id=chat_id,
+        message_thread_id=thread_id,
         question=pergunta_enquete[:300],
         options=opcoes_enquete,
         type="quiz",
@@ -164,18 +158,44 @@ async def send_quiz(row, context):
         "correta": correct_index,
         "peso": int(row["Peso"]) if row["Peso"] else 1,
         "comentario": comentario,
-        "chat_id": GROUP_ID
+        "chat_id": chat_id,
+        "thread_id": thread_id
     }
 
-    # ===============================
-    # 💬 Comentário automático (mantido igual)
-    # ===============================
+    # Comentário automático
     if tempo and comentario:
         context.job_queue.run_once(
             enviar_comentario_automatico,
             when=tempo,
             data={"poll_id": poll.poll.id}
         )
+
+
+# ===============================
+# COMENTÁRIO AUTOMÁTICO
+# ===============================
+async def enviar_comentario_automatico(context: ContextTypes.DEFAULT_TYPE):
+
+    poll_id = context.job.data["poll_id"]
+    poll_info = context.bot_data.get(poll_id)
+
+    if not poll_info:
+        return
+
+    comentario = poll_info.get("comentario")
+    if not comentario:
+        return
+
+    comentario = escape_markdown(comentario)
+    texto = f"🧠 Comentário:\n\n||{comentario}||"
+
+    await context.bot.send_message(
+        chat_id=poll_info["chat_id"],
+        message_thread_id=poll_info["thread_id"],
+        text=texto,
+        parse_mode="MarkdownV2"
+    )
+
 
 # ===============================
 # COMANDO /quiz
@@ -189,15 +209,11 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Use: /quiz Q001-Q010 ou /quiz Q001 Q002")
         return
 
-    argumentos = context.args
+    for arg in context.args:
 
-    for arg in argumentos:
-
-        # 🔥 Detecta intervalo Q001-Q010
         if "-" in arg:
             inicio, fim = arg.split("-")
-
-            prefixo = inicio[:1]  # normalmente "Q"
+            prefixo = inicio[:1]
             num_inicio = int(inicio[1:])
             num_fim = int(fim[1:])
 
@@ -206,8 +222,13 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row = find_question_by_id(question_id)
 
                 if row:
-                    await send_quiz(row, context)
-                    await asyncio.sleep(1)  # ⏳ DELAY 1 SEGUNDO
+                    await send_quiz(
+                        row,
+                        context,
+                        chat_id=update.effective_chat.id,
+                        thread_id=update.message.message_thread_id
+                    )
+                    await asyncio.sleep(1)
                 else:
                     await update.message.reply_text(f"{question_id} não encontrado.")
 
@@ -215,43 +236,15 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row = find_question_by_id(arg)
 
             if row:
-                await send_quiz(row, context)
-                await asyncio.sleep(3)  # ⏳ DELAY 1 SEGUNDO
+                await send_quiz(
+                    row,
+                    context,
+                    chat_id=update.effective_chat.id,
+                    thread_id=update.message.message_thread_id
+                )
+                await asyncio.sleep(1)
             else:
                 await update.message.reply_text(f"{arg} não encontrado.")
-
-# ===============================
-# COMANDO /comentario
-# ===============================
-async def comentario(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_chat.id != GROUP_ID:
-        return
-
-    if not context.args:
-        await update.message.reply_text("Use: /comentario ID")
-        return
-
-    question_id = context.args[0]
-    row = find_question_by_id(question_id)
-
-    if not row:
-        await update.message.reply_text("ID não encontrado.")
-        return
-
-    comentario_texto = row.get("Comentário", "").strip()
-
-    if not comentario_texto:
-        await update.message.reply_text("Essa questão não possui comentário.")
-        return
-
-    comentario_texto = escape_markdown(comentario_texto)
-    texto = f"🧠 Comentário:\n\n||{comentario_texto}||"
-
-    await update.message.reply_text(
-        texto,
-        parse_mode="MarkdownV2"
-    )
 
 
 # ===============================
@@ -262,7 +255,6 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
     current = now_local()
 
     for row in rows:
-
         question_id = row["ID"].strip()
 
         if question_id in SENT_QUESTIONS:
@@ -283,7 +275,12 @@ async def check_scheduled_questions(context: ContextTypes.DEFAULT_TYPE):
         question_datetime = question_datetime.replace(tzinfo=TIMEZONE)
 
         if current >= question_datetime:
-            await send_quiz(row, context)
+            await send_quiz(
+                row,
+                context,
+                chat_id=GROUP_ID,
+                thread_id=None
+            )
             SENT_QUESTIONS.add(question_id)
 
 
@@ -343,7 +340,6 @@ def main():
 
     app.add_handler(CommandHandler("quiz", quiz))
     app.add_handler(CommandHandler("ranking", ranking))
-    app.add_handler(CommandHandler("comentario", comentario))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
 
     app.job_queue.run_repeating(
