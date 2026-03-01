@@ -101,28 +101,30 @@ async def send_quiz(row, context):
         pergunta_base = "Qual a alternativa correta?"
 
     # ===============================
-    # 📜 Se texto > 300 envia separado
+    # 📜 1️⃣ ENVIAR ENUNCIADO PRIMEIRO
     # ===============================
     if len(pergunta_completa) > 300:
         await context.bot.send_message(
             chat_id=GROUP_ID,
             text=pergunta_completa
         )
+        await asyncio.sleep(0.4)
         pergunta_enquete = pergunta_base
     else:
         pergunta_enquete = pergunta_completa
 
     # ===============================
-    # 🖼 Se tiver imagem → envia
+    # 🖼 2️⃣ ENVIAR IMAGEM (SE EXISTIR)
     # ===============================
     if imagem_url:
         await context.bot.send_photo(
             chat_id=GROUP_ID,
             photo=imagem_url
         )
+        await asyncio.sleep(0.4)
 
     # ===============================
-    # 📏 Verificar tamanho das alternativas
+    # 📏 3️⃣ VERIFICAR TAMANHO DAS ALTERNATIVAS
     # ===============================
     alternativas_longas = any(len(alt) > 100 for alt in alternativas)
 
@@ -137,14 +139,14 @@ async def send_quiz(row, context):
             chat_id=GROUP_ID,
             text=texto_alternativas
         )
+        await asyncio.sleep(0.4)
 
-        # Enquete simplificada
         opcoes_enquete = ["A", "B", "C", "D"]
     else:
         opcoes_enquete = alternativas
 
     # ===============================
-    # 🗳 Criar enquete
+    # 🗳 4️⃣ ENVIAR ENQUETE POR ÚLTIMO
     # ===============================
     poll = await context.bot.send_poll(
         chat_id=GROUP_ID,
@@ -165,7 +167,9 @@ async def send_quiz(row, context):
         "chat_id": GROUP_ID
     }
 
-    # Comentário automático
+    # ===============================
+    # 💬 Comentário automático (mantido igual)
+    # ===============================
     if tempo and comentario:
         context.job_queue.run_once(
             enviar_comentario_automatico,
