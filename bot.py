@@ -182,18 +182,36 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Use: /quiz ID1 ID2 ID3")
+        await update.message.reply_text("Use: /quiz Q001-Q010 ou /quiz Q001 Q002")
         return
 
-    for question_id in context.args:
-        row = find_question_by_id(question_id)
+    argumentos = context.args
 
-        if not row:
-            await update.message.reply_text(f"ID {question_id} não encontrado.")
-            continue
+    for arg in argumentos:
 
-        await send_quiz(row, context)
+        # 🔥 Detecta intervalo Q001-Q010
+        if "-" in arg:
+            inicio, fim = arg.split("-")
 
+            prefixo = inicio[:1]  # Q
+            num_inicio = int(inicio[1:])
+            num_fim = int(fim[1:])
+
+            for numero in range(num_inicio, num_fim + 1):
+                question_id = f"{prefixo}{numero:03d}"
+                row = find_question_by_id(question_id)
+
+                if row:
+                    await send_quiz(row, context)
+                else:
+                    await update.message.reply_text(f"{question_id} não encontrado.")
+        else:
+            row = find_question_by_id(arg)
+
+            if row:
+                await send_quiz(row, context)
+            else:
+                await update.message.reply_text(f"{arg} não encontrado.")
 
 # ===============================
 # COMANDO /comentario
