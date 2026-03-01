@@ -71,6 +71,10 @@ def find_question_by_id(question_id):
 # ===============================
 async def send_quiz(row, context):
 
+    pergunta_completa = row["Pergunta"].strip()
+    alternativas = [row["A"], row["B"], row["C"], row["D"]]
+    imagem_url = row.get("Imagem", "").strip()
+
     correct_index = ["A", "B", "C", "D"].index(row["Correta"].strip())
 
     try:
@@ -78,66 +82,74 @@ async def send_quiz(row, context):
     except:
         tempo = None
 
-    pergunta_completa = row["Pergunta"].strip()
-    imagem_url = row.get("Imagem", "").strip()
+    # ===============================
+    # 🎯 Detectar tipo automaticamente
+    # ===============================
+    texto_lower = pergunta_completa.lower()
 
-    alternativas = [
-        row["A"].strip(),
-        row["B"].strip(),
-        row["C"].strip(),
-        row["D"].strip(),
+    palavras_incorreta = [
+        "incorreta", "incorreto",
+        "falsa", "falso",
+        "errada", "errado",
+        "exceto", "não é correta",
+        "não é correto"
     ]
 
-    precisa_separar = False
+    if any(p in texto_lower for p in palavras_incorreta):
+        pergunta_base = "Qual a alternativa INCORRETA?"
+    else:
+        pergunta_base = "Qual a alternativa correta?"
 
-    # Regra 1: pergunta muito longa
+    # ===============================
+    # 📜 Se texto > 300 envia separado
+    # ===============================
     if len(pergunta_completa) > 300:
-        precisa_separar = True
-
-    # Regra 2: alternativa muito longa
-    for alt in alternativas:
-        if len(alt) > 100:
-            precisa_separar = True
-            break
-
-    # Regra 3: tem imagem
-    if imagem_url:
-        precisa_separar = True
-
-    # 🔹 Se precisar separar
-    if precisa_separar:
-
-        # Envia texto completo
         await context.bot.send_message(
             chat_id=GROUP_ID,
             text=pergunta_completa
         )
-
-        # Envia imagem se existir
-        if imagem_url:
-            await context.bot.send_photo(
-                chat_id=GROUP_ID,
-                photo=imagem_url
-            )
-
-        pergunta_enquete = "Qual a alternativa correta?"
-
-        # Cortar alternativas se necessário
-        alternativas_corrigidas = []
-        for alt in alternativas:
-            if len(alt) > 100:
-                alternativas_corrigidas.append(alt[:97] + "...")
-            else:
-                alternativas_corrigidas.append(alt)
-
+        pergunta_enquete = pergunta_base
     else:
         pergunta_enquete = pergunta_completa
-        alternativas_corrigidas = alternativas
 
+    # ===============================
+    # 🖼 Se tiver imagem → envia
+    # ===============================
+    if imagem_url:
+        await context.bot.send_photo(
+            chat_id=GROUP_ID,
+            photo=imagem_url
+        )
+
+    # ===============================
+    # 📏 Verificar tamanho das alternativas
+    # ===============================
+    alternativas_longas = any(len(alt) > 100 for alt in alternativas)
+
+    if alternativas_longas:
+        texto_alternativas = "Alternativas:\n\n"
+        letras = ["A", "B", "C", "D"]
+
+        for i, alt in enumerate(alternativas):
+            texto_alternativas += f"{letras[i]}) {alt}\n\n"
+
+        await context.bot.send_message(
+            chat_id=GROUP_ID,
+            text=texto_alternativas
+        )
+
+        # Enquete simplificada
+        opcoes_enquete = ["A", "B", "C", "D"]
+    else:
+        opcoes_enquete = alternativas
+
+    # ===============================
+    # 🗳 Criar enquete
+    # ===============================
     poll = await context.bot.send_poll(
         chat_id=GROUP_ID,
-        question=pergunta_enquete,
-        options=alternativas_corrigidas,
+        question=pergunta_enquete[:300],
+        options=opcoes_enquete,
         type="quiz",
         correct_option_id=correct_index,
         is_anonymous=False,
@@ -153,13 +165,13 @@ async def send_quiz(row, context):
         "chat_id": GROUP_ID
     }
 
+    # Comentário automático
     if tempo and comentario:
         context.job_queue.run_once(
             enviar_comentario_automatico,
             when=tempo,
             data={"poll_id": poll.poll.id}
         )
-
 
 # ===============================
 # COMANDO /quiz
