@@ -212,7 +212,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if row:
                 await send_quiz(row, context)
-                await asyncio.sleep(1)  # ⏳ DELAY 1 SEGUNDO
+                await asyncio.sleep(3)  # ⏳ DELAY 1 SEGUNDO
             else:
                 await update.message.reply_text(f"{arg} não encontrado.")
 
